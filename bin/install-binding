@@ -5,7 +5,7 @@ set -euo pipefail
 file="$HOME/.config/hypr/bindings.lua"
 marker="agent-radial quick selector"
 
-if grep -q "$marker" "$file" 2>/dev/null; then
+if grep -qE "$marker|xavier.agent-radial/bin/agent-radial" "$file" 2>/dev/null; then
   echo "Binding already installed in $file"
   exit 0
 fi
