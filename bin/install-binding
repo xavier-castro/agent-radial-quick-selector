@@ -1,0 +1,24 @@
+#!/bin/bash
+# Adds the SUPER+SHIFT+CTRL+A binding to ~/.config/hypr/bindings.lua.
+# Replaces Omarchy's default "Agent" binding (omarchy-agent --pick).
+set -euo pipefail
+file="$HOME/.config/hypr/bindings.lua"
+marker="agent-radial quick selector"
+
+if grep -q "$marker" "$file" 2>/dev/null; then
+  echo "Binding already installed in $file"
+  exit 0
+fi
+
+cp "$file" "$file.bak.$(date +%s)"
+cat >>"$file" <<LUA
+
+-- $marker: press once for the radial menu, twice for the default agent.
+-- Replaces the stock SUPER+SHIFT+CTRL+A -> omarchy-agent --pick.
+hl.unbind("SUPER + SHIFT + CTRL + A")
+o.bind("SUPER + SHIFT + CTRL + A", "Agent radial menu", os.getenv("HOME") .. "/.config/omarchy/plugins/xavier.agent-radial/bin/agent-radial")
+LUA
+
+hyprctl reload >/dev/null
+hyprctl configerrors
+echo "Installed. Press SUPER+SHIFT+CTRL+A."

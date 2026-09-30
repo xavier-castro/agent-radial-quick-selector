@@ -1,0 +1,150 @@
+#!/bin/bash
+# Agent catalogue for the radial menu.
+#   agents state         -> "default=<id>" then "<id> <installed 1|0> <running-in-herdr 1|0>"
+#   agents run <id>      -> open <id> in its herdr tab (focus if it exists), installing if missing
+#   agents run <id> --new  -> always open a fresh tab
+#   agents default       -> same, for the Omarchy default agent
+# Never changes the Omarchy default agent.
+# Mirrors omarchy-default-agent / omarchy-agent, minus the default-setting.
+
+# id|display|mise package or empty|custom installer
+AGENTS=(
+  "pi|Pi||"
+  "omp|omp|github:can1357/oh-my-pi|"
+  "opencode|OpenCode||"
+  "claude|Claude||"
+  "codex|Codex||"
+  "grok|Grok|npm:@xai-official/grok|"
+  "gemini|Gemini||"
+  "openclaw|OpenClaw||omarchy-install-openclaw-cli"
+  "hermes|Hermes||omarchy-install-hermes-cli"
+  "copilot|Copilot||"
+  "crush|Crush||"
+  "cursor-agent|Cursor||"
+  "muse|Muse|http:muse[url=https://api.meta.ai/muse-launcher.sh,bin=muse,version_list_url=https://api.meta.ai/muse-code/channels/muse-stable,version_json_path=.version]|"
+)
+
+field() { # <id> <index>
+  local row
+  for row in "${AGENTS[@]}"; do
+    [[ ${row%%|*} == "$1" ]] && { IFS='|' read -ra f <<<"$row"; echo "${f[$2]}"; return; }
+  done
+}
+
+user_install() {
+  [[ -x $HOME/.local/bin/$1 ]] &&
+    { [[ -L $HOME/.local/bin/$1 ]] || ! grep -q '^mise use -g' "$HOME/.local/bin/$1"; }
+}
+
+installed() { # <id>
+  local id=$1 pkg installer
+  pkg=$(field "$id" 2); pkg=${pkg:-$id}
+  installer=$(field "$id" 3)
+  if [[ -n $installer ]]; then "$installer" --check &>/dev/null
+  else user_install "$id" || mise where "$pkg" &>/dev/null
+  fi
+}
+
+install() {
+  local id=$1 pkg installer
+  pkg=$(field "$id" 2); pkg=${pkg:-$id}
+  installer=$(field "$id" 3)
+  if [[ -n $installer ]]; then "$installer" --now
+  else user_install "$id" || mise use -g "$pkg"
+  fi
+}
+
+# Same unattended flags omarchy-agent uses.
+command_for() {
+  case "$1" in
+  opencode) command=(opencode --auto) ;;
+  gemini) command=(gemini --yolo) ;;
+  copilot) command=(copilot --allow-all) ;;
+  crush) command=(crush --yolo) ;;
+  claude) command=(claude --permission-mode auto) ;;
+  grok) command=(grok --permission-mode bypassPermissions) ;;
+  openclaw) command=(omarchy-launch-openclaw --tui) ;;
+  codex) command=(codex --approve-for-me) ;;
+  cursor-agent) command=(cursor-agent --yolo --trust) ;;
+  hermes) command=(hermes --yolo) ;;
+  muse) command=(muse --approval-mode never) ;;
+  omp) command=(omp --auto-approve) ;;
+  pi) command=(pi) ;;
+  *) echo "Unknown agent: $1" >&2; exit 1 ;;
+  esac
+}
+
+[[ $PWD == "$HOME" && -d $HOME/Work ]] && cd "$HOME/Work"
+
+HERDR_APP_ID=org.omarchy.herdr
+
+herdr_up() { herdr status server 2>/dev/null | grep -q '^status: running'; }
+
+# JSON list of tab labels -> ids, for tabs whose label is the agent id
+herdr_tab_for() { # <id> -> tab id (first match) or empty
+  herdr tab list 2>/dev/null | jq -r --arg l "$1" '.result.tabs[]? | select(.label == $l) | .tab_id' | head -n1
+}
+
+# Focus (or open) the herdr window, make sure the server is up.
+ensure_herdr() {
+  omarchy-launch-or-focus-tui --app-id=$HERDR_APP_ID herdr >/dev/null 2>&1
+  local i
+  for i in $(seq 1 100); do herdr_up && return 0; sleep 0.1; done
+  return 1
+}
+
+# Open <id> in herdr: focus its tab if one exists, otherwise create a tab that
+# installs (if needed) and then becomes the agent, so the tab closes when the
+# agent exits.
+run_in_herdr() { # <id> [--new]
+  local id=$1 new=${2:-} tab pane out
+  ensure_herdr || { notify-send "Agents" "herdr did not start"; exit 1; }
+  if [[ $new != --new ]]; then
+    tab=$(herdr_tab_for "$id")
+    if [[ -n $tab ]]; then herdr tab focus "$tab" >/dev/null; return 0; fi
+  fi
+  out=$(herdr tab create --label "$id" --cwd "$PWD" --focus) || exit 1
+  pane=$(jq -r '.result.root_pane.pane_id' <<<"$out")
+  herdr pane run "$pane" "exec '$0' run $id --inline" >/dev/null
+}
+
+case "${1:-}" in
+state)
+  echo "default=$(omarchy-default-agent)"
+  running=""
+  herdr_up && running=$(herdr tab list 2>/dev/null | jq -r '.result.tabs[]?.label')
+  for row in "${AGENTS[@]}"; do
+    id=${row%%|*}
+    i=0; installed "$id" && i=1
+    r=0; grep -qxF "$id" <<<"$running" && r=1
+    echo "$id $i $r"
+  done
+  ;;
+run)
+  id=${2:?agent id required}
+  command_for "$id"
+  if [[ ${3:-} == --inline ]]; then
+    # Inside a terminal/pane: install if missing, then become the agent.
+    if ! installed "$id"; then
+      install "$id" || {
+        echo "Could not install $id" >&2
+        read -rn1 -p "Press any key..."
+        exit 1
+      }
+      printf '\033[2J\033[3J\033[H'
+    fi
+    exec "${command[@]}"
+  fi
+  run_in_herdr "$id" "${3:-}"
+  ;;
+default)
+  # Double-press target: the Omarchy default agent, through herdr.
+  id=$(omarchy-default-agent)
+  if [[ -z $id ]]; then exec omarchy-menu summon setup.default.agent; fi
+  run_in_herdr "$id"
+  ;;
+*)
+  echo "Usage: agents state | run <id> [--new|--inline] | default" >&2
+  exit 1
+  ;;
+esac

@@ -1,0 +1,20 @@
+#!/bin/bash
+# Keybinding entry point.
+#   single press  -> toggle the radial menu
+#   double press  -> close it and launch the default agent (default agent, in herdr)
+# Hyprland has no native double-tap, so presses are timestamped in the runtime dir.
+PLUGIN=xavier.agent-radial
+WINDOW_MS=${AGENT_RADIAL_DOUBLE_MS:-400}
+stamp="${XDG_RUNTIME_DIR:-/tmp}/agent-radial.last"
+
+now=$(date +%s%3N)
+last=$(cat "$stamp" 2>/dev/null || echo 0)
+
+if ((now - last < WINDOW_MS)); then
+  echo 0 >"$stamp"
+  omarchy-shell shell hide "$PLUGIN" >/dev/null 2>&1
+  exec "$(dirname "$(readlink -f "$0")")/agents" default
+fi
+
+echo "$now" >"$stamp"
+exec omarchy-shell shell toggle "$PLUGIN" '{}'

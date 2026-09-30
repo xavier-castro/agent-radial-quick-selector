@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "xavier.agent-radial",
+  "name": "Agent radial quick selector",
+  "version": "1.0.0",
+  "author": "Xavier Castro",
+  "license": "MIT",
+  "description": "A radial (pie) menu of every coding agent, opened from one keybinding. Missing agents install on pick, each agent lives in its own herdr tab, and a double press opens your default agent.",
+  "kinds": ["overlay"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Radial.qml"
+  }
+}
