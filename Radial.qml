@@ -37,13 +37,16 @@ Item {
     { id: "copilot",      label: "Copilot",  glyph: cp(0xf4b8),  font: "" },
     { id: "crush",        label: "Crush",    glyph: cp(0xf02d1), font: "" },
     { id: "cursor-agent", label: "Cursor",   glyph: cp(0xe90d),  font: "omarchy" },
-    { id: "muse",         label: "Muse",     glyph: cp(0xf06e4), font: "" }
+    { id: "muse",         label: "Muse",     glyph: cp(0xf06e4), font: "" },
+    { id: "grok-bot",     label: "Grok Bot", glyph: cp(0x2726),  font: "" },
+    { id: "chatgpt",      label: "ChatGPT",  glyph: cp(0xf544),  font: "" }
   ]
   readonly property int count: agents.length
   readonly property real step: 2 * Math.PI / count
 
   function isInstalled(id) { return installedMap[id] !== false }
   function isRunning(id) { return runningMap[id] === true }
+  function isDesktop(id) { return id === "grok-bot" || id === "chatgpt" }
 
   function indexOfAgent(id) {
     for (var i = 0; i < agents.length; i++) if (agents[i].id === id) return i
@@ -70,13 +73,13 @@ Item {
     else root.open("{}")
   }
 
-  // fresh = open a new herdr tab even if this agent already has one
-  function launch(index, fresh) {
+  // focus = focus the agent's existing herdr tab instead of opening a fresh one
+  function launch(index, focus) {
     if (index < 0 || index >= count) return
     var id = agents[index].id
     root.dismiss()
     var cmd = [root.agentsBin, "run", id]
-    if (fresh) cmd.push("--new")
+    if (focus) cmd.push("--focus")
     Quickshell.execDetached(cmd)
   }
 
@@ -177,9 +180,9 @@ Item {
         var s = sectorAt(m.x, m.y)
         var dx = m.x - width / 2, dy = m.y - height / 2
         var dist = Math.sqrt(dx * dx + dy * dy)
-        var fresh = (m.modifiers & Qt.ShiftModifier) !== 0
-        if (s >= 0) root.launch(s, fresh)
-        else if (dist < panel.innerR) root.launch(root.selectedIndex, fresh)
+        var focus = (m.modifiers & Qt.ShiftModifier) !== 0
+        if (s >= 0) root.launch(s, focus)
+        else if (dist < panel.innerR) root.launch(root.selectedIndex, focus)
         else root.dismiss()
       }
     }
@@ -323,7 +326,8 @@ Item {
       Text {
         anchors.horizontalCenter: parent.horizontalCenter
         text: !parent.present ? "not installed — will install"
-              : root.isRunning(parent.cur.id) ? "running — focus  (shift: new tab)"
+              : root.isRunning(parent.cur.id) ? "running — new tab  (shift: focus)"
+              : root.isDesktop(parent.cur.id) ? "desktop app"
               : (parent.cur.id === root.defaultAgent ? "default agent" : "open in herdr")
         color: Color.menu.text
         opacity: 0.7

@@ -1,8 +1,8 @@
 #!/bin/bash
 # Agent catalogue for the radial menu.
 #   agents state         -> "default=<id>" then "<id> <installed 1|0> <running-in-herdr 1|0>"
-#   agents run <id>      -> open <id> in its herdr tab (focus if it exists), installing if missing
-#   agents run <id> --new  -> always open a fresh tab
+#   agents run <id>        -> open <id> in a fresh herdr tab (adds another if running), installing if missing
+#   agents run <id> --focus -> focus <id>'s existing tab if present, else open a fresh tab
 #   agents default       -> same, for the Omarchy default agent
 # Never changes the Omarchy default agent.
 # Mirrors omarchy-default-agent / omarchy-agent, minus the default-setting.
@@ -22,6 +22,8 @@ AGENTS=(
   "crush|Crush||"
   "cursor-agent|Cursor||"
   "muse|Muse|http:muse[url=https://api.meta.ai/muse-launcher.sh,bin=muse,version_list_url=https://api.meta.ai/muse-code/channels/muse-stable,version_json_path=.version]|"
+  "grok-bot|Grok Bot|||desktop"
+  "chatgpt|ChatGPT|||desktop"
 )
 
 field() { # <id> <index>
@@ -37,10 +39,12 @@ user_install() {
 }
 
 installed() { # <id>
-  local id=$1 pkg installer
+  local id=$1 pkg installer kind
   pkg=$(field "$id" 2); pkg=${pkg:-$id}
   installer=$(field "$id" 3)
-  if [[ -n $installer ]]; then "$installer" --check &>/dev/null
+  kind=$(field "$id" 4)
+  if [[ $kind == desktop ]]; then command -v "$id" >/dev/null 2>&1
+  elif [[ -n $installer ]]; then "$installer" --check &>/dev/null
   else user_install "$id" || mise where "$pkg" &>/dev/null
   fi
 }
@@ -52,6 +56,17 @@ install() {
   if [[ -n $installer ]]; then "$installer" --now
   else user_install "$id" || mise use -g "$pkg"
   fi
+}
+
+# GUI apps launch outside herdr. This only launches apps already installed;
+# their installation is managed by Omarchy / the app's own installer.
+launch_desktop() {
+  local id=$1
+  if ! installed "$id"; then
+    notify-send "Agent radial" "$id is not installed. Install it first, then try again."
+    return 1
+  fi
+  exec gtk-launch "$id"
 }
 
 # Same unattended flags omarchy-agent uses.
@@ -93,13 +108,14 @@ ensure_herdr() {
   return 1
 }
 
-# Open <id> in herdr: focus its tab if one exists, otherwise create a tab that
-# installs (if needed) and then becomes the agent, so the tab closes when the
-# agent exits.
-run_in_herdr() { # <id> [--new]
-  local id=$1 new=${2:-} tab pane out
+# Open <id> in herdr: a fresh tab by default, so picking an agent that's
+# already running starts another instance. With --focus, focus the existing
+# tab instead. Each tab installs (if needed) and then becomes the agent, so
+# the tab closes when the agent exits.
+run_in_herdr() { # <id> [--focus]
+  local id=$1 mode=${2:-} tab pane out
   ensure_herdr || { notify-send "Agents" "herdr did not start"; exit 1; }
-  if [[ $new != --new ]]; then
+  if [[ $mode == --focus ]]; then
     tab=$(herdr_tab_for "$id")
     if [[ -n $tab ]]; then herdr tab focus "$tab" >/dev/null; return 0; fi
   fi
@@ -113,15 +129,25 @@ state)
   echo "default=$(omarchy-default-agent)"
   running=""
   herdr_up && running=$(herdr tab list 2>/dev/null | jq -r '.result.tabs[]?.label')
+  clients=$(hyprctl clients -j 2>/dev/null || echo '[]')
   for row in "${AGENTS[@]}"; do
     id=${row%%|*}
     i=0; installed "$id" && i=1
-    r=0; grep -qxF "$id" <<<"$running" && r=1
+    r=0
+    if [[ $(field "$id" 4) == desktop ]]; then
+      case "$id" in
+        grok-bot) jq -e '[.[] | select((.class // "" | ascii_downcase | contains("grok bot")) or (.title // "" | ascii_downcase | contains("grok bot")))] | length > 0' <<<"$clients" >/dev/null && r=1 ;;
+        chatgpt) jq -e '[.[] | select((.class // "" | ascii_downcase | contains("chatgpt")) or (.title // "" | ascii_downcase | contains("chatgpt")))] | length > 0' <<<"$clients" >/dev/null && r=1 ;;
+      esac
+    else
+      grep -qxF "$id" <<<"$running" && r=1
+    fi
     echo "$id $i $r"
   done
   ;;
 run)
   id=${2:?agent id required}
+  if [[ $(field "$id" 4) == desktop ]]; then launch_desktop "$id"; exit $?; fi
   command_for "$id"
   if [[ ${3:-} == --inline ]]; then
     # Inside a terminal/pane: install if missing, then become the agent.
@@ -144,7 +170,7 @@ default)
   run_in_herdr "$id"
   ;;
 *)
-  echo "Usage: agents state | run <id> [--new|--inline] | default" >&2
+  echo "Usage: agents state | run <id> [--focus|--inline] | default" >&2
   exit 1
   ;;
 esac
